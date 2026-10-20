@@ -64,3 +64,22 @@ def test_sample_dataset_is_valid():
         TicketIn(customer_email=row["customer_email"], subject=row["subject"], body=row["body"])
         Category(row["expected_category"])
         Urgency(row["expected_urgency"])
+
+
+def test_classify_endpoint_stores_triage():
+    from app.llm.fake import FakeLLM
+    from app.main import llm_dependency
+
+    app.dependency_overrides[llm_dependency] = lambda: FakeLLM(
+        ['{"category": "billing", "confidence": 0.95, "reason": "Double charge"}']
+    )
+    try:
+        ticket = client.post("/tickets", json=VALID_TICKET).json()
+        response = client.post(f"/tickets/{ticket['id']}/classify")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "triaged"
+        assert body["triage"]["category"] == "billing"
+        assert client.post("/tickets/unknown/classify").status_code == 404
+    finally:
+        app.dependency_overrides.clear()
