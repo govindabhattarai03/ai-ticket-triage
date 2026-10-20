@@ -2,15 +2,18 @@
 
 Run:  uvicorn app.main:app --reload   then open http://localhost:8000/docs
 """
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 
+from app.llm.base import LLMClient, LLMError
+from app.llm.factory import get_llm
 from app.models import Ticket, TicketIn
 from app.store import InMemoryTicketStore
+from app.triage.classifier import classify_ticket
 
 app = FastAPI(
     title="AI Ticket Triage",
-    version="0.1.0",
-    description="Receives support tickets; LLM triage is added in stage 2.",
+    version="0.2.0",
+    description="Receives support tickets and classifies them with an LLM.",
 )
 
 store = InMemoryTicketStore()
@@ -38,3 +41,25 @@ def get_ticket(ticket_id: str):
     if ticket is None:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return ticket
+
+
+def llm_dependency() -> LLMClient:
+    """Give the endpoint an LLM client; a configuration problem becomes a clear 503."""
+    try:
+        return get_llm()
+    except LLMError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/tickets/{ticket_id}/classify", response_model=Ticket)
+def classify(ticket_id: str, llm: LLMClient = Depends(llm_dependency)):
+    """Ask the LLM to classify the ticket and store the result on it."""
+    ticket = store.get(ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    try:
+        ticket.triage = classify_ticket(ticket, llm)
+    except LLMError as e:
+        raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
+    ticket.status = "triaged"
+    return store.add(ticket)
