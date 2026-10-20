@@ -58,8 +58,14 @@ def classify_ticket(ticket: TicketIn, llm: LLMClient,
         answer = llm.complete(SYSTEM_PROMPT, prompt)
         try:
             result = Classification(**extract_json(answer))
-        except (ValueError, ValidationError) as e:  # json errors are ValueErrors too
-            last_error = str(e).splitlines()[0][:200]
+        except ValidationError as e:
+            # Tell the LLM exactly which field is wrong, e.g. "category: Input should be 'bug', ..."
+            last_error = "; ".join(
+                f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()
+            )[:300]
+            continue
+        except ValueError as e:  # no JSON found, or invalid JSON syntax
+            last_error = str(e)[:300]
             continue
 
         return TriageResult(
