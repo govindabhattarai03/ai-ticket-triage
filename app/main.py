@@ -63,3 +63,18 @@ def classify(ticket_id: str, llm: LLMClient = Depends(llm_dependency)):
         raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
     ticket.status = "triaged"
     return store.add(ticket)
+
+@app.get("/stats")
+def stats():
+    """Count tickets in total and per category (only classified tickets have a category)."""
+    tickets = store.list(limit=10_000)
+    by_category: dict[str, int] = {}
+    for ticket in tickets:
+        if ticket.triage is not None:
+            category = ticket.triage.category.value
+            by_category[category] = by_category.get(category, 0) + 1
+    return {
+        "total": len(tickets),
+        "classified": sum(by_category.values()),
+        "by_category": by_category,
+    }
