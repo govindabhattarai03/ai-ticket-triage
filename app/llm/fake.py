@@ -15,6 +15,8 @@ KEYWORDS = {
     "feature_request": ["would be great", "could you add", "please add", "feature", "it would help"],
 }
 
+URGENT_WORDS = ["urgent", "down", "right now", "cannot work", "losing", "immediately", "bloqué"]
+
 
 class FakeLLM:
     def __init__(self, script: list[str] | None = None):
@@ -28,9 +30,11 @@ class FakeLLM:
             return self._script.pop(0)
 
         text = user.lower()
+        urgency = "high" if any(w in text for w in URGENT_WORDS) else "medium"
+        summary = user.splitlines()[0].removeprefix("Subject: ")[:200] or "Support request"
         for category, words in KEYWORDS.items():
             if any(word in text for word in words):
-                return json.dumps({"category": category, "confidence": 0.6,
-                                   "reason": "keyword match (fake LLM)"})
-        return json.dumps({"category": "other", "confidence": 0.3,
-                           "reason": "no keyword matched (fake LLM)"})
+                return json.dumps({"category": category, "urgency": urgency, "summary": summary,
+                                   "confidence": 0.6, "reason": "keyword match (fake LLM)"})
+        return json.dumps({"category": "other", "urgency": "low", "summary": summary,
+                           "confidence": 0.3, "reason": "no keyword matched (fake LLM)"})

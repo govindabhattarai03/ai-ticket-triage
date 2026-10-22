@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from app import config
 from app.llm.base import LLMClient
-from app.models import Category, Classification, TicketIn, TriageResult
+from app.models import Category, Classification, TicketIn, TriageResult, Urgency
 
 # Below this confidence, a human should check the ticket
 REVIEW_THRESHOLD = 0.5
@@ -27,9 +27,18 @@ Classify the ticket into exactly one category:
 - feature_request: a request for new functionality or an improvement
 - other: anything else (general questions, partnerships, thanks, press, GDPR...)
 
-Tickets may be in English or French.
+Then rate its urgency:
+- high: the customer cannot work at all, many users are affected, money is being lost right now, or there is a security risk
+- medium: something important is wrong but there is a workaround or limited impact
+- low: questions, requests, small issues with no time pressure
+
+Tickets may be in English or French. Always write the summary in English.
 Answer with ONLY a JSON object, no other text:
-{{"category": one of {[c.value for c in Category]}, "confidence": number between 0 and 1, "reason": "one short sentence"}}"""
+{{"category": one of {[c.value for c in Category]},
+  "urgency": one of {[u.value for u in Urgency]},
+  "summary": "the problem in one short sentence (max 20 words)",
+  "confidence": number between 0 and 1,
+  "reason": "why you chose this category, one short sentence"}}"""
 
 
 def build_user_message(ticket: TicketIn) -> str:
@@ -78,6 +87,8 @@ def classify_ticket(ticket: TicketIn, llm: LLMClient,
     # Every attempt failed: don't crash, hand the ticket to a human instead
     return TriageResult(
         category=Category.OTHER,
+        urgency=Urgency.MEDIUM,  # unknown: don't ignore it, don't panic either
+        summary=ticket.subject,
         confidence=0.0,
         reason=f"LLM output invalid after {max_retries + 1} attempts: {last_error}",
         model=llm.name,

@@ -71,7 +71,8 @@ def test_classify_endpoint_stores_triage():
     from app.main import llm_dependency
 
     app.dependency_overrides[llm_dependency] = lambda: FakeLLM(
-        ['{"category": "billing", "confidence": 0.95, "reason": "Double charge"}']
+        ['{"category": "billing", "urgency": "medium", "summary": "Charged twice", '
+         '"confidence": 0.95, "reason": "Double charge"}']
     )
     try:
         ticket = client.post("/tickets", json=VALID_TICKET).json()
@@ -80,6 +81,7 @@ def test_classify_endpoint_stores_triage():
         body = response.json()
         assert body["status"] == "triaged"
         assert body["triage"]["category"] == "billing"
+        assert body["triage"]["urgency"] == "medium"
         assert client.post("/tickets/unknown/classify").status_code == 404
     finally:
         app.dependency_overrides.clear()

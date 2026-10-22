@@ -29,6 +29,8 @@ class Classification(BaseModel):
     """What the LLM must return. Anything else is rejected and the LLM is asked again."""
 
     category: Category
+    urgency: Urgency
+    summary: str = Field(min_length=1, max_length=200)
     confidence: float = Field(ge=0, le=1)
     reason: str = Field(min_length=1, max_length=300)
 
