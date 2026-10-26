@@ -9,11 +9,13 @@ from app.llm.factory import get_llm
 from app.models import Ticket, TicketIn
 from app.store import InMemoryTicketStore
 from app.triage.classifier import classify_ticket
+from app.triage.pipeline import triage_ticket
 
 app = FastAPI(
     title="AI Ticket Triage",
-    version="0.2.0",
-    description="Receives support tickets and classifies them with an LLM.",
+    version="0.3.0",
+    description="Receives support tickets, classifies them with an LLM, applies business rules "
+                "and routes them to the right team.",
 )
 
 store = InMemoryTicketStore()
@@ -63,6 +65,21 @@ def classify(ticket_id: str, llm: LLMClient = Depends(llm_dependency)):
         raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
     ticket.status = "triaged"
     return store.add(ticket)
+
+
+@app.post("/tickets/{ticket_id}/triage", response_model=Ticket)
+def triage(ticket_id: str, llm: LLMClient = Depends(llm_dependency)):
+    """Full workflow: LLM classification -> business rules -> routing to a team."""
+    ticket = store.get(ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    try:
+        ticket.triage, ticket.routing = triage_ticket(ticket, llm)
+    except LLMError as e:
+        raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
+    ticket.status = "routed"
+    return store.add(ticket)
+
 
 @app.get("/stats")
 def stats():

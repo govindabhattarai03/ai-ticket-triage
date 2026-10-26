@@ -43,6 +43,26 @@ class TriageResult(Classification):
     needs_human_review: bool
 
 
+class Team(str, Enum):
+    ENGINEERING = "engineering"
+    FINANCE = "finance"
+    ACCOUNT_SUPPORT = "account_support"
+    PRODUCT = "product"
+    GENERAL_SUPPORT = "general_support"
+    SECURITY = "security"
+    HUMAN_REVIEW = "human_review"  # a support lead checks the AI's decision first
+
+
+class Routing(BaseModel):
+    """The final decision: who handles the ticket, how urgently, and why."""
+
+    team: Team
+    final_urgency: Urgency
+    sla_hours: int  # the team must answer within this many hours
+    rules_applied: list[str]
+    needs_human_review: bool
+
+
 class TicketIn(BaseModel):
     """What a user sends when opening a ticket."""
 
@@ -56,5 +76,6 @@ class Ticket(TicketIn):
 
     id: str = Field(default_factory=lambda: uuid4().hex[:12])
     received_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    status: str = "new"  # new -> triaged -> routed (routing comes in stage 3)
+    status: str = "new"  # new -> triaged (LLM only) or routed (full pipeline)
     triage: TriageResult | None = None
+    routing: Routing | None = None

@@ -85,3 +85,26 @@ def test_classify_endpoint_stores_triage():
         assert client.post("/tickets/unknown/classify").status_code == 404
     finally:
         app.dependency_overrides.clear()
+
+def test_triage_endpoint_runs_full_pipeline():
+    from app.llm.fake import FakeLLM
+    from app.main import llm_dependency
+
+    app.dependency_overrides[llm_dependency] = lambda: FakeLLM(
+        ['{"category": "billing", "urgency": "low", "summary": "Invoice question", '
+         '"confidence": 0.9, "reason": "Invoice"}']
+    )
+    try:
+        ticket = client.post("/tickets", json={
+            **VALID_TICKET, "body": "Please send the invoice again, it's urgent for our accountant."
+        }).json()
+        body = client.post(f"/tickets/{ticket['id']}/triage").json()
+        assert body["status"] == "routed"
+        assert body["triage"]["urgency"] == "low"                 # LLM decision
+        assert body["routing"]["final_urgency"] == "medium"       # raised by a rule
+        assert body["routing"]["rules_applied"] == ["customer_marked_urgent"]
+        assert body["routing"]["team"] == "finance"
+        assert body["routing"]["sla_hours"] == 24
+        assert client.post("/tickets/unknown/triage").status_code == 404
+    finally:
+        app.dependency_overrides.clear()

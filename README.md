@@ -11,10 +11,42 @@ classify each ticket, extract its key details, score its urgency, summarise it a
 
 - [x] **Stage 1:** project setup, ticket data model, FastAPI service, labelled sample dataset, tests
 - [x] **Stage 2:** LLM client and ticket classification with validated JSON output
-- [ ] **Stage 3:** orchestration: classify → extract → urgency → route, with business rules
+- [x] **Stage 3:** urgency and summary from the LLM, business rules, routing to teams with SLAs
 - [ ] **Stage 4:** storage in SQL and batch automation
 - [ ] **Stage 5:** evaluation: accuracy, latency and cost across models
 - [ ] **Stage 6:** Docker, dashboard and final documentation
+
+## How triage works
+
+```mermaid
+flowchart LR
+    T[New ticket] --> C[1. LLM<br/>category, urgency,<br/>summary, confidence]
+    C --> R[2. Business rules<br/>security, mass impact,<br/>customer urgency]
+    R --> X[3. Routing<br/>team + SLA]
+    X --> E[Engineering / Finance /<br/>Account support / Product /<br/>General support]
+    X --> S[Security]
+    X --> H[Human review]
+```
+
+The LLM is used for what it does well: understanding free text in English or French.
+Decisions that must be predictable and auditable are made in plain code:
+
+| Rule | Effect |
+|---|---|
+| Security incident (hacked, suspicious login, phishing, *piraté*…) | always **high**, sent to the **security** team, human review |
+| Many people blocked (*"none of our 300 employees"*, *"all users"*…) | raised to **high** (not for feature requests) |
+| Customer says "urgent" | never left at **low**, raised to **medium** only |
+| Feature request | never **high**: capped at **medium** |
+
+Every rule that fires is listed in `rules_applied`, so each decision can be explained.
+Tickets the AI is unsure about (confidence < 0.5 or invalid output) go to **human review**.
+The rules are tested against the 50 labelled tickets so they never overturn a correct label.
+
+| Final urgency | SLA (first answer within) |
+|---|---|
+| high | 4 hours |
+| medium | 24 hours |
+| low | 72 hours |
 
 ## How classification works
 
@@ -59,7 +91,7 @@ uvicorn app.main:app --reload    # open http://localhost:8000/docs
 pytest -q
 ```
 
-Try it: `POST /tickets` to create a ticket, then `POST /tickets/{id}/classify`.
+Try it: `POST /tickets` to create a ticket, then `POST /tickets/{id}/triage`.
 
 ## API
 
@@ -69,14 +101,16 @@ Try it: `POST /tickets` to create a ticket, then `POST /tickets/{id}/classify`.
 | POST | `/tickets` | Receive a new ticket (validated) |
 | GET | `/tickets` | List tickets, newest first |
 | GET | `/tickets/{id}` | Get one ticket |
-| POST | `/tickets/{id}/classify` | Classify the ticket with the LLM and store the result |
+| POST | `/tickets/{id}/classify` | LLM classification only |
+| POST | `/tickets/{id}/triage` | Full workflow: LLM → business rules → team and SLA |
+| GET | `/stats` | Ticket counts, total and per category |
 
 ## Project structure
 
 ```
 app/
   main.py               FastAPI endpoints
-  models.py             Ticket, Classification and TriageResult models (Pydantic)
+  models.py             Ticket, Classification, TriageResult and Routing models (Pydantic)
   store.py              in-memory ticket storage (SQL in stage 4)
   config.py             settings from .env
   llm/
@@ -86,6 +120,9 @@ app/
     factory.py          picks the client from LLM_PROVIDER
   triage/
     classifier.py       prompt, JSON extraction, validation, retries, fallback
+    rules.py            business rules (security, mass impact, urgency)
+    router.py           team lookup and SLA
+    pipeline.py         connects the steps: LLM -> rules -> routing
 data/sample_tickets.jsonl   50 labelled tickets (EN/FR) for evaluation
-tests/                      20 tests, no network or API key needed
+tests/                      36 tests, no network or API key needed
 ```
