@@ -7,18 +7,19 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from app.llm.base import LLMClient, LLMError
 from app.llm.factory import get_llm
 from app.models import Ticket, TicketIn
-from app.store import InMemoryTicketStore
+from app import config
+from app.store import SQLiteTicketStore
 from app.triage.classifier import classify_ticket
 from app.triage.pipeline import triage_ticket
 
 app = FastAPI(
     title="AI Ticket Triage",
-    version="0.3.0",
+    version="0.4.0",
     description="Receives support tickets, classifies them with an LLM, applies business rules "
                 "and routes them to the right team.",
 )
 
-store = InMemoryTicketStore()
+store = SQLiteTicketStore(config.DATABASE_PATH)
 
 
 @app.get("/health")

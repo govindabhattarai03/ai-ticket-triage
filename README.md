@@ -92,6 +92,7 @@ pytest -q
 ```
 
 Try it: `POST /tickets` to create a ticket, then `POST /tickets/{id}/triage`.
+Tickets are saved in `tickets.db` (SQLite), so they are still there after a restart.
 
 ## API
 
@@ -111,7 +112,7 @@ Try it: `POST /tickets` to create a ticket, then `POST /tickets/{id}/triage`.
 app/
   main.py               FastAPI endpoints
   models.py             Ticket, Classification, TriageResult and Routing models (Pydantic)
-  store.py              in-memory ticket storage (SQL in stage 4)
+  store.py              SQLite storage (one row per ticket, LLM answer and final decision in separate columns)
   config.py             settings from .env
   llm/
     base.py             the LLM interface
@@ -124,5 +125,5 @@ app/
     router.py           team lookup and SLA
     pipeline.py         connects the steps: LLM -> rules -> routing
 data/sample_tickets.jsonl   50 labelled tickets (EN/FR) for evaluation
-tests/                      36 tests, no network or API key needed
+tests/                      41 tests, no network, API key or database file needed
 ```

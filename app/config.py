@@ -22,3 +22,6 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
 # How many times to ask the LLM again when its answer is not valid
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
+
+# Where tickets are stored (a single SQLite file). ":memory:" = temporary, used by tests.
+DATABASE_PATH = os.getenv("DATABASE_PATH", "tickets.db")
