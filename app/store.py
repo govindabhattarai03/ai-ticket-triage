@@ -161,3 +161,20 @@ class SQLiteTicketStore:
     def clear(self) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM tickets")
+    # ---- analytics ------------------------------------------------------------------
+    GROUPABLE = {"status", "category", "llm_urgency", "final_urgency", "team", "model"}
+
+    def count_by(self, column: str) -> dict[str, int]:
+        """SELECT column, COUNT(*) ... GROUP BY column, e.g. count_by("team").
+
+        Column names can't be passed as SQL parameters, so we only accept names from
+        an allow-list: that way user input can never inject SQL.
+        """
+        if column not in self.GROUPABLE:
+            raise ValueError(f"cannot group by {column!r}")
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT {column} AS value, COUNT(*) AS n FROM tickets "
+                f"WHERE {column} IS NOT NULL GROUP BY {column} ORDER BY n DESC"
+            ).fetchall()
+        return {row["value"]: row["n"] for row in rows}

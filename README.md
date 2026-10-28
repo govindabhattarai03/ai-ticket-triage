@@ -12,7 +12,7 @@ classify each ticket, extract its key details, score its urgency, summarise it a
 - [x] **Stage 1:** project setup, ticket data model, FastAPI service, labelled sample dataset, tests
 - [x] **Stage 2:** LLM client and ticket classification with validated JSON output
 - [x] **Stage 3:** urgency and summary from the LLM, business rules, routing to teams with SLAs
-- [ ] **Stage 4:** storage in SQL and batch automation
+- [x] **Stage 4:** SQLite storage and an idempotent, resumable batch job
 - [ ] **Stage 5:** evaluation: accuracy, latency and cost across models
 - [ ] **Stage 6:** Docker, dashboard and final documentation
 
@@ -94,6 +94,53 @@ pytest -q
 Try it: `POST /tickets` to create a ticket, then `POST /tickets/{id}/triage`.
 Tickets are saved in `tickets.db` (SQLite), so they are still there after a restart.
 
+## Batch processing
+
+Triage a whole file of tickets in one command (results are stored in `tickets.db`):
+
+```bash
+python -m app.batch data/sample_tickets.jsonl            # all 50 tickets
+python -m app.batch data/sample_tickets.jsonl --limit 5  # just the first 5
+```
+
+```
+[1/50] T001 bug             -> engineering     medium SLA 24h  (0.8s)
+[2/50] T002 billing         -> finance         medium SLA 24h  (0.7s)
+[3/50] T003 account_access  -> account_support high   SLA  4h  (0.9s)
+...
+=== Batch summary ===
+Triaged now: 50   Already done (skipped): 0
+All tickets in the database:
+  by team           {'finance': 11, 'engineering': 10, ...}
+```
+
+The job is built like a production data pipeline:
+
+- **Idempotent:** each ticket keeps its id from the file and finished tickets are skipped,
+  so running the job twice never triages (or pays for) a ticket twice.
+- **Resumable:** if the LLM stops answering (rate limit, quota, network), the job stops cleanly;
+  run the same command again and it continues where it stopped.
+- **Rate-limit friendly:** waits 4 seconds between LLM calls by default (`--delay`).
+
+## Analysing the results with SQL
+
+Each ticket is one row in the `tickets` table, with the LLM's answer (`llm_urgency`) and the
+final decision after the rules (`final_urgency`) in separate columns. Open `tickets.db` with
+any SQLite tool (e.g. *DB Browser for SQLite*, or the *SQLite Viewer* extension in VS Code):
+
+```sql
+-- How many tickets each team received, by urgency
+SELECT team, final_urgency, COUNT(*) AS tickets
+FROM tickets GROUP BY team, final_urgency ORDER BY team;
+
+-- Where the business rules overruled the LLM
+SELECT id, subject, llm_urgency, final_urgency, rules_applied
+FROM tickets WHERE llm_urgency <> final_urgency;
+
+-- Tickets waiting for a human
+SELECT id, subject, category, confidence FROM tickets WHERE needs_human_review = 1;
+```
+
 ## API
 
 | Method | Endpoint | What it does |
@@ -124,6 +171,7 @@ app/
     rules.py            business rules (security, mass impact, urgency)
     router.py           team lookup and SLA
     pipeline.py         connects the steps: LLM -> rules -> routing
+  batch.py              command-line job: triage a JSONL file into the database
 data/sample_tickets.jsonl   50 labelled tickets (EN/FR) for evaluation
-tests/                      41 tests, no network, API key or database file needed
+tests/                      47 tests, no network, API key or database file needed
 ```
