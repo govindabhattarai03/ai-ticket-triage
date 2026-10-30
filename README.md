@@ -122,6 +122,18 @@ The job is built like a production data pipeline:
   run the same command again and it continues where it stopped.
 - **Rate-limit friendly:** waits 4 seconds between LLM calls by default (`--delay`).
 
+## Evaluation
+
+After the batch job, compare the results with the correct labels:
+
+```bash
+python -m app.evaluate data/sample_tickets.jsonl
+```
+
+It prints a summary and writes a full report to [`reports/evaluation.md`](reports/evaluation.md):
+category accuracy, urgency accuracy before and after the business rules, serious errors
+(high ↔ low), confusion matrices, and whether the LLM's confidence can be trusted.
+
 ## Analysing the results with SQL
 
 Each ticket is one row in the `tickets` table, with the LLM's answer (`llm_urgency`) and the
@@ -172,6 +184,7 @@ app/
     router.py           team lookup and SLA
     pipeline.py         connects the steps: LLM -> rules -> routing
   batch.py              command-line job: triage a JSONL file into the database
+  evaluate.py           compares results with the labels, writes reports/evaluation.md
 data/sample_tickets.jsonl   50 labelled tickets (EN/FR) for evaluation
-tests/                      47 tests, no network, API key or database file needed
+tests/                      53 tests, no network, API key or database file needed
 ```
