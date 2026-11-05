@@ -10,7 +10,7 @@ from app.models import Ticket, TicketIn
 from app import config
 from app.store import SQLiteTicketStore
 from app.triage.classifier import classify_ticket
-from app.triage.pipeline import triage_ticket
+from app.triage.pipeline import triage_with_metrics
 
 app = FastAPI(
     title="AI Ticket Triage",
@@ -75,7 +75,7 @@ def triage(ticket_id: str, llm: LLMClient = Depends(llm_dependency)):
     if ticket is None:
         raise HTTPException(status_code=404, detail="Ticket not found")
     try:
-        ticket.triage, ticket.routing = triage_ticket(ticket, llm)
+        ticket.triage, ticket.routing, ticket.metrics = triage_with_metrics(ticket, llm)
     except LLMError as e:
         raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
     ticket.status = "routed"

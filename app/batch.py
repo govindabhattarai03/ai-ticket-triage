@@ -2,6 +2,7 @@
 
 Run:  python -m app.batch data/sample_tickets.jsonl
       python -m app.batch data/sample_tickets.jsonl --limit 5 --delay 4
+      python -m app.batch data/sample_tickets.jsonl --model gemini-3.8-flash --db runs/flash.db
 
 Designed like a real data pipeline job:
 - Idempotent: each ticket keeps its id from the file, and tickets already routed
@@ -21,7 +22,7 @@ from app.llm.base import LLMClient, LLMError
 from app.llm.factory import get_llm
 from app.models import Ticket
 from app.store import SQLiteTicketStore
-from app.triage.pipeline import triage_ticket
+from app.triage.pipeline import triage_with_metrics
 
 
 @dataclass
@@ -31,6 +32,7 @@ class BatchReport:
     stopped_early: bool = False
     error: str = ""
     latencies: list[float] = field(default_factory=list)
+    rate_limited: int = 0
 
 
 def load_tickets(path: Path) -> list[Ticket]:
@@ -57,22 +59,28 @@ def run_batch(tickets: list[Ticket], store: SQLiteTicketStore, llm: LLMClient,
         if report.processed > 0 and delay > 0:
             sleep(delay)
 
-        start = time.perf_counter()
         try:
-            ticket.triage, ticket.routing = triage_ticket(ticket, llm)
+            ticket.triage, ticket.routing, ticket.metrics = triage_with_metrics(ticket, llm)
         except LLMError as e:
             report.stopped_early, report.error = True, str(e)
             log(f"[{i}/{len(tickets)}] {ticket.id} stopped: {e}")
             break
-        elapsed = time.perf_counter() - start
+        elapsed = ticket.metrics.latency_ms / 1000
 
         ticket.status = "routed"
         store.add(ticket)
         report.processed += 1
         report.latencies.append(elapsed)
-        r = ticket.routing
+        report.rate_limited += ticket.metrics.rate_limited
+        r, m = ticket.routing, ticket.metrics
+        notes = []
+        if m.llm_requests > 1:
+            notes.append(f"{m.llm_requests} LLM requests")
+        if m.rate_limited:
+            notes.append(f"{m.rate_limited}x rate-limited")
         log(f"[{i}/{len(tickets)}] {ticket.id} {ticket.triage.category.value:<15} -> "
-            f"{r.team.value:<15} {r.final_urgency.value:<6} SLA {r.sla_hours:>2}h  ({elapsed:.1f}s)")
+            f"{r.team.value:<15} {r.final_urgency.value:<6} SLA {r.sla_hours:>2}h  ({elapsed:.1f}s)"
+            + (f"  [{', '.join(notes)}]" if notes else ""))
     return report
 
 
@@ -82,6 +90,7 @@ def print_summary(report: BatchReport, store: SQLiteTicketStore) -> None:
     if report.latencies:
         avg = sum(report.latencies) / len(report.latencies)
         print(f"Average time per ticket: {avg:.2f}s   Slowest: {max(report.latencies):.2f}s")
+        print(f"Rate-limited answers (429) waited out: {report.rate_limited}")
     print("\nAll tickets in the database:")
     for column in ("team", "final_urgency", "category"):
         print(f"  by {column:<14} {store.count_by(column)}")
@@ -97,12 +106,15 @@ def main() -> None:
     parser.add_argument("--delay", type=float, default=4.0,
                         help="seconds to wait between LLM calls (default 4, for free-tier limits)")
     parser.add_argument("--db", default=config.DATABASE_PATH, help="SQLite file (default from .env)")
+    parser.add_argument("--model", help="model name, overrides GEMINI_MODEL / OLLAMA_MODEL from .env")
     args = parser.parse_args()
 
     tickets = load_tickets(args.file)[: args.limit]
+    if args.db != ":memory:":
+        Path(args.db).parent.mkdir(parents=True, exist_ok=True)   # e.g. runs/ for comparisons
     store = SQLiteTicketStore(args.db)
     try:
-        llm = get_llm()
+        llm = get_llm(args.model)
     except LLMError as e:
         raise SystemExit(f"Cannot start: {e}")
 

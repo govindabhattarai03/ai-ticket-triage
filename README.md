@@ -13,7 +13,7 @@ classify each ticket, extract its key details, score its urgency, summarise it a
 - [x] **Stage 2:** LLM client and ticket classification with validated JSON output
 - [x] **Stage 3:** urgency and summary from the LLM, business rules, routing to teams with SLAs
 - [x] **Stage 4:** SQLite storage and an idempotent, resumable batch job
-- [ ] **Stage 5:** evaluation: accuracy, latency and cost across models
+- [x] **Stage 5:** evaluation against labels, and model comparison (accuracy, speed, rate limits, cost)
 - [ ] **Stage 6:** Docker, dashboard and final documentation
 
 ## How triage works
@@ -134,6 +134,24 @@ It prints a summary and writes a full report to [`reports/evaluation.md`](report
 category accuracy, urgency accuracy before and after the business rules, serious errors
 (high ↔ low), confusion matrices, and whether the LLM's confidence can be trusted.
 
+## Comparing models
+
+Every triage records its cost: time, LLM requests, rate-limit waits (HTTP 429) and tokens.
+Run the batch once per model into separate databases, then compare:
+
+```bash
+python -m app.batch data/sample_tickets.jsonl --model gemini-3.5-flash-lite --db runs/flash-lite.db
+python -m app.batch data/sample_tickets.jsonl --model gemini-3.8-flash      --db runs/flash.db
+python -m app.compare data/sample_tickets.jsonl runs/flash-lite.db runs/flash.db
+```
+
+The result is written to [`reports/model_comparison.md`](reports/model_comparison.md): accuracy,
+median / 95th percentile time, retries, rate limits, tokens per ticket and the estimated cost
+of 1,000 tickets at paid-tier prices.
+
+New metric columns were added to the database with a small migration (`ALTER TABLE … ADD COLUMN`
+on startup), so databases created before this stage keep working with their data intact.
+
 ## Analysing the results with SQL
 
 Each ticket is one row in the `tickets` table, with the LLM's answer (`llm_urgency`) and the
@@ -170,7 +188,7 @@ SELECT id, subject, category, confidence FROM tickets WHERE needs_human_review =
 ```
 app/
   main.py               FastAPI endpoints
-  models.py             Ticket, Classification, TriageResult and Routing models (Pydantic)
+  models.py             Ticket, Classification, TriageResult, Routing and TriageMetrics models (Pydantic)
   store.py              SQLite storage (one row per ticket, LLM answer and final decision in separate columns)
   config.py             settings from .env
   llm/
@@ -185,6 +203,7 @@ app/
     pipeline.py         connects the steps: LLM -> rules -> routing
   batch.py              command-line job: triage a JSONL file into the database
   evaluate.py           compares results with the labels, writes reports/evaluation.md
+  compare.py            compares model runs side by side, writes reports/model_comparison.md
 data/sample_tickets.jsonl   50 labelled tickets (EN/FR) for evaluation
-tests/                      53 tests, no network, API key or database file needed
+tests/                      61 tests, no network, API key or database file needed
 ```

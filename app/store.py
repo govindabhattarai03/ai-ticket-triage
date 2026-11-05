@@ -12,7 +12,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 
-from app.models import Routing, Ticket, TriageResult
+from app.models import Routing, Ticket, TriageMetrics, TriageResult
 
 
 class InMemoryTicketStore:
@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS tickets (
     rules_applied       TEXT,            -- JSON list, e.g. ["security_incident"]
     needs_human_review  INTEGER,
 
+    -- cost of the triage (added in stage 5, see MIGRATIONS)
+    latency_ms          INTEGER,
+    llm_requests        INTEGER,
+    rate_limited        INTEGER,
+    input_tokens        INTEGER,
+    output_tokens       INTEGER,
+
     updated_at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tickets_received_at ON tickets (received_at);
@@ -72,8 +79,20 @@ COLUMNS = [
     "id", "customer_email", "subject", "body", "received_at", "status",
     "category", "llm_urgency", "summary", "confidence", "reason", "model", "attempts",
     "llm_needs_review", "team", "final_urgency", "sla_hours", "rules_applied",
-    "needs_human_review", "updated_at",
+    "needs_human_review", "latency_ms", "llm_requests", "rate_limited", "input_tokens",
+    "output_tokens", "updated_at",
 ]
+
+# Columns added after the first version of the table. A database created before
+# stage 5 doesn't have them, so we add them on startup: existing rows are kept,
+# and the new columns are simply empty (NULL) for old tickets.
+MIGRATIONS = {
+    "latency_ms": "INTEGER",
+    "llm_requests": "INTEGER",
+    "rate_limited": "INTEGER",
+    "input_tokens": "INTEGER",
+    "output_tokens": "INTEGER",
+}
 
 
 class SQLiteTicketStore:
@@ -85,11 +104,19 @@ class SQLiteTicketStore:
         self._lock = threading.Lock()
         with self._lock:
             self._conn.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(tickets)")}
+        for column, sql_type in MIGRATIONS.items():
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE tickets ADD COLUMN {column} {sql_type}")
+        self._conn.commit()
 
     # ---- Ticket <-> row conversion -------------------------------------------------
     @staticmethod
     def _to_row(ticket: Ticket) -> dict:
-        t, r = ticket.triage, ticket.routing
+        t, r, m = ticket.triage, ticket.routing, ticket.metrics
         return {
             "id": ticket.id,
             "customer_email": ticket.customer_email,
@@ -110,6 +137,11 @@ class SQLiteTicketStore:
             "sla_hours": r.sla_hours if r else None,
             "rules_applied": json.dumps(r.rules_applied) if r else None,
             "needs_human_review": int(r.needs_human_review) if r else None,
+            "latency_ms": m.latency_ms if m else None,
+            "llm_requests": m.llm_requests if m else None,
+            "rate_limited": m.rate_limited if m else None,
+            "input_tokens": m.input_tokens if m else None,
+            "output_tokens": m.output_tokens if m else None,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -122,6 +154,13 @@ class SQLiteTicketStore:
                 confidence=row["confidence"], reason=row["reason"], model=row["model"],
                 attempts=row["attempts"], needs_human_review=bool(row["llm_needs_review"]),
             )
+        metrics = None
+        if row["latency_ms"] is not None:
+            metrics = TriageMetrics(
+                latency_ms=row["latency_ms"], llm_requests=row["llm_requests"],
+                rate_limited=row["rate_limited"], input_tokens=row["input_tokens"],
+                output_tokens=row["output_tokens"],
+            )
         routing = None
         if row["team"] is not None:
             routing = Routing(
@@ -132,7 +171,7 @@ class SQLiteTicketStore:
         return Ticket(
             id=row["id"], customer_email=row["customer_email"], subject=row["subject"],
             body=row["body"], received_at=row["received_at"], status=row["status"],
-            triage=triage, routing=routing,
+            triage=triage, routing=routing, metrics=metrics,
         )
 
     # ---- the four methods the API uses ---------------------------------------------

@@ -63,6 +63,16 @@ class Routing(BaseModel):
     needs_human_review: bool
 
 
+class TriageMetrics(BaseModel):
+    """What triaging one ticket cost, for comparing models."""
+
+    latency_ms: int        # total time, including retries and rate-limit waits
+    llm_requests: int      # > 1 when the LLM's JSON was invalid and we asked again
+    rate_limited: int      # "429 Too Many Requests" answers that had to be waited out
+    input_tokens: int
+    output_tokens: int
+
+
 class TicketIn(BaseModel):
     """What a user sends when opening a ticket."""
 
@@ -79,3 +89,4 @@ class Ticket(TicketIn):
     status: str = "new"  # new -> triaged (LLM only) or routed (full pipeline)
     triage: TriageResult | None = None
     routing: Routing | None = None
+    metrics: TriageMetrics | None = None
