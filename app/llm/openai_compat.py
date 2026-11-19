@@ -50,7 +50,7 @@ class OpenAICompatibleClient:
                 if response.status_code not in (429, 500, 502, 503, 504):
                     # 400/401/403/404: retrying will not help (bad key, bad model name...)
                     raise LLMError(f"HTTP {response.status_code}: {response.text[:300]}")
-                error = f"HTTP {response.status_code}"
+                error = f"HTTP {response.status_code}: {response.text[:200]}"
 
             if attempt < self._max_attempts:
                 time.sleep(2 ** attempt)  # wait 2s, then 4s: rate limits often clear quickly
