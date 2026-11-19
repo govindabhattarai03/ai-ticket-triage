@@ -1,0 +1,17 @@
+# Files Docker must NOT copy into the image
+.git
+.github
+.venv
+venv
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# secrets and local data stay on your laptop
+.env
+*.db
+runs/
+reports/
+
+# tests run in CI, not in the production image
+tests/

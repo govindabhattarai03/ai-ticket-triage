@@ -15,3 +15,25 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pytest -q
+
+  docker:
+    # Builds the real image and checks the running container end to end (fake LLM, no API key)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t ai-ticket-triage .
+      - name: Start the API container
+        run: docker run -d --name api -p 8000:8000 -e LLM_PROVIDER=fake ai-ticket-triage
+      - name: Smoke test - create and triage a ticket
+        run: |
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
+          id=$(curl -sf -X POST localhost:8000/tickets -H 'content-type: application/json' \
+            -d '{"customer_email":"ci@example.com","subject":"App crashes","body":"The app crashes when I export a PDF."}' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          curl -sf -X POST localhost:8000/tickets/$id/triage \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"] == "routed", d; print("routed to", d["routing"]["team"])'
+      - name: Show container logs if something failed
+        if: failure()
+        run: docker logs api

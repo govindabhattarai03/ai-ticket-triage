@@ -1,0 +1,19 @@
+services:
+  api:
+    build: .
+    image: ai-ticket-triage
+    ports:
+      - "8000:8000"
+    # Your settings (LLM_PROVIDER, GEMINI_API_KEY...) come from .env.
+    # Without a .env file the app still starts, with the offline fake LLM.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_PATH: /app/storage/tickets.db
+    volumes:
+      - ticket-data:/app/storage   # the SQLite database survives restarts and rebuilds
+    restart: unless-stopped
+
+volumes:
+  ticket-data:
