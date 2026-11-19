@@ -11,7 +11,7 @@ def get_llm(model: str | None = None) -> LLMClient:
         if not config.GEMINI_API_KEY:
             raise LLMError("GEMINI_API_KEY is missing. Copy .env.example to .env and add your key.")
         return OpenAICompatibleClient(config.GEMINI_BASE_URL, model or config.GEMINI_MODEL,
-                                      api_key=config.GEMINI_API_KEY)
+                                      api_key=config.GEMINI_API_KEY, timeout=config.LLM_TIMEOUT)
     if config.LLM_PROVIDER == "ollama":
         return OpenAICompatibleClient(config.OLLAMA_BASE_URL, model or config.OLLAMA_MODEL,
                                       timeout=120)

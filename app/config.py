@@ -25,3 +25,6 @@ LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
 
 # Where tickets are stored (a single SQLite file). ":memory:" = temporary, used by tests.
 DATABASE_PATH = os.getenv("DATABASE_PATH", "tickets.db")
+
+# How long to wait for one LLM answer before giving up (seconds). The free tier can be slow.
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "90"))
